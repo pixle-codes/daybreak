@@ -117,6 +117,22 @@ def prune_lines(text: str, keep_last: int = 10,
     return "".join(lines), moves
 
 
+def count_blocks(text: str) -> tuple[int, int | None]:
+    """(inline Completed blocks, 1-based line of the Completed heading).
+
+    (0, None) when the journal has no Completed section.
+    """
+    lines = text.splitlines()
+    bounds = completed_bounds(lines)
+    if bounds is None:
+        return 0, None
+    lo, hi = bounds
+    # lo is the 0-based first content line == heading's 1-based number + ... :
+    # completed_bounds returns start = heading_idx + 1, so the heading itself
+    # sits at 1-based line `lo`.
+    return len(split_blocks(lines, lo, hi)), lo
+
+
 def _moved_text(text: str, moves: list[dict]) -> str:
     lines = text.splitlines(keepends=True)
     return "".join("".join(lines[m["start"]:m["end"]]) for m in moves)

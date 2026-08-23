@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import __version__, digest as _digest, dupes as _dupes, prune as _prune
 from .parser import parse_paths
-from .verify import statusline, verify
+from .verify import check_inline_budget, statusline, verify
 
 
 def _die(msg: str) -> int:
@@ -49,6 +49,11 @@ def cmd_verify(args) -> int:
     report = verify(entries, projects_root=args.projects_root,
                     remote=args.remote, run_tests=args.run_tests,
                     today=today, max_age_days=args.max_age_days)
+    if getattr(args, "max_completed", None) is not None:
+        if args.max_completed < 0:
+            return _die("--max-completed must be >= 0")
+        report.findings.extend(
+            check_inline_budget(args.files, args.max_completed))
     if args.statusline:
         print(statusline(report))
         return report.exit_code()
@@ -107,6 +112,21 @@ def cmd_prune(args) -> int:
     old_text = journal.read_text(encoding="utf-8", errors="replace")
     new_text, moves = _prune.prune_lines(
         old_text, keep_last=args.keep_last or 10, before=args.before)
+    info = None
+    if moves and args.write:
+        archive = (Path(args.archive) if args.archive else
+                   journal.with_name(journal.stem + "-archive" + journal.suffix))
+        info = _prune.apply_prune(journal, new_text, moves, archive, old_text)
+    if args.statusline:
+        if not moves:
+            print("daybreak PRUNE: nothing to archive")
+        elif info:
+            print(f"daybreak PRUNE: archived {len(moves)} entries, "
+                  f"{len(old_text)}→{len(new_text)} bytes")
+        else:
+            print(f"daybreak PRUNE: would archive {len(moves)} entries, "
+                  f"{len(old_text) - len(new_text)} bytes smaller")
+        return 0
     if args.json:
         print(json.dumps({
             "mode": "write" if args.write else "dry-run",
@@ -127,9 +147,6 @@ def cmd_prune(args) -> int:
         return 0
     if not args.write:
         return 0
-    archive = (Path(args.archive) if args.archive else
-               journal.with_name(journal.stem + "-archive" + journal.suffix))
-    info = _prune.apply_prune(journal, new_text, moves, archive, old_text)
     if not args.json:
         print(f"backup {info['backup']}; archive {info['archive']}")
     return 0
@@ -162,6 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run claimed test suites and compare counts")
     v.add_argument("--max-age-days", type=int, default=None, metavar="N",
                    help="error when the newest dated entry is older than N days")
+    v.add_argument("--max-completed", type=int, default=None, metavar="N",
+                   help="error when a Completed section holds more than N "
+                        "inline entries (bloat watchdog; repair via prune)")
     v.add_argument("--statusline", action="store_true",
                    help="single-line summary (cron/alerting)")
     v.add_argument("--json", action="store_true")
@@ -190,7 +210,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--write", action="store_true",
                     help="apply changes (default: dry-run)")
     pr.add_argument("--archive", default=None,
-                    help="archive file (default: <journal>-archive.md)")
+                    help="archive file (default: sibling <stem>-archive.md)")
+    pr.add_argument("--statusline", action="store_true",
+                    help="one-line family-convention summary")
     pr.add_argument("--json", action="store_true")
     pr.set_defaults(func=cmd_prune)
     return p

@@ -95,6 +95,13 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   (future-dated entries ignored; undated journals warn, never error),
   `--today` wired through verify CLI; README nightly cron recipe
   (tag v1.2.0)
+- [x] M6 — decay loop closed (s67): `verify --max-completed N` bloat
+  watchdog (ERROR + repair command in detail when a Completed section
+  holds >N inline entries; ok finding under budget; off by default;
+  dir args expand like parse_paths) + `prune --statusline`; loop proof
+  pinned by test (flag → prune --write → clean). Motivation: prune sat
+  unused since v1.1.0 because nothing ever signaled it was due — the
+  live STATE.md grew to ~66 inline entries. (tag v1.3.0)
 
 ## Gotchas learned
 

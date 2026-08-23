@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from . import prune as _prune
+
 _REPO_RE = re.compile(r"\bprojects/([A-Za-z0-9_.-]+)")
 _GH_RE = re.compile(r"github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+)")
 _VERSION_RE = re.compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
@@ -241,6 +243,38 @@ def _check_freshness(entries, max_age_days: int, today: date):
                         f"than --max-age-days {max_age_days}", where)]
     return [Finding("ok", "fresh", "journal freshness",
                     f"newest entry {age}d old ({newest.isoformat()})", where)]
+
+
+def check_inline_budget(paths, limit: int):
+    """Completed-section bloat watchdog: > limit inline entries => error.
+
+    Closes the decay loop with `prune`: the finding names the exact
+    repair command. Journals without a Completed section pass clean.
+    Directories expand to their top-level *.md files (parse_paths rule).
+    """
+    findings = []
+    for raw in paths:
+        p = Path(raw)
+        files = sorted(p.glob("*.md")) if p.is_dir() else [p]
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                findings.append(Finding("warn", "bloat", str(f),
+                                        f"unreadable: {exc}", str(f)))
+                continue
+            count, lineno = _prune.count_blocks(text)
+            where = f"{f}:{lineno}" if lineno else str(f)
+            if count > limit:
+                findings.append(Finding(
+                    "error", "bloat", f"{count} inline entries",
+                    f"Completed section exceeds --max-completed {limit}; "
+                    f"run: python3 -m daybreak prune {f} --write", where))
+            else:
+                findings.append(Finding(
+                    "ok", "bloat", "inline budget",
+                    f"{count} inline entries (max {limit})", where))
+    return findings
 
 
 def statusline(report: VerifyReport) -> str:

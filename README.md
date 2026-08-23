@@ -124,6 +124,34 @@ Selectors: `--keep-last N` (keep newest N session entries) or
 Note: `digest`/`dupes`/`stats` remain read-only — `prune` is the one
 daybreak command that writes, and only with `--write`.
 
+### The decay loop — `verify --max-completed` finds bloat, `prune` fixes it
+
+Decay only works if something tells you it's due. `verify --max-completed N`
+is the watchdog: when a Completed section holds more than N inline entries
+it raises an ERROR (exit 1, statusline `FAIL … [bloat] …`) whose detail is
+the exact repair command. Under budget it reports ok; without the flag the
+check is off. One command pair closes the loop:
+
+```sh
+$ daybreak verify STATE.md --max-completed 12 --statusline
+daybreak FAIL: 1 errors, 0 warn — [bloat] 34 inline entries: Completed section exceeds --max-completed 12; run: python3 -m daybreak prune STATE.md --write
+$ python3 -m daybreak prune STATE.md --keep-last 12 --write --statusline
+daybreak PRUNE: archived 22 entries, 51234→18702 bytes
+$ daybreak verify STATE.md --max-completed 12 --statusline
+daybreak OK: 74 checks, 0 errors, 0 warn
+```
+
+Nightly recipe with both rot and bloat covered:
+
+```sh
+python3 -m daybreak verify ~/journal/STATE.md --remote \
+  --max-age-days 3 --max-completed 12 --statusline \
+  || python3 -m daybreak prune ~/journal/STATE.md --keep-last 12 --write
+```
+
+`prune --statusline` gives the family one-liner (`would archive …` on a
+dry run, `archived N entries, X→Y bytes`, or `nothing to archive`).
+
 ## Install
 
 Zero dependencies beyond Python 3.10+ stdlib; `verify` shells out to `git`.
