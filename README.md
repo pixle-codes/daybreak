@@ -73,6 +73,31 @@ failure mode). Exits 1 when pairs are found.
 Entries, token estimate, dated fraction, oldest entry, NEXT-pointer count,
 per-section histogram.
 
+### `prune` — decay: archive stale Completed entries
+
+Journals only grow, so session-start cost grows with them. `prune` moves
+`## Completed` entries older than a retention window into a sibling
+archive file (`STATE.md` → `STATE-archive.md`), byte-spliced so every
+other section is untouched. Dry-run by default; `--write` first backs the
+journal up to `<name>.prune-bak`, then applies atomically, then appends
+the moved blocks verbatim to the archive. Entries without an explicit
+`sNN` session marker never move; re-running moves nothing (idempotent).
+
+```sh
+$ daybreak prune STATE.md --keep-last 8        # dry-run preview
+  [s31] - **fenceline v1.0.0 NEW s31 …
+  [s30] - **s30 RESEARCH-DRY SESSION** …
+would archive 12 block(s), 5321 bytes smaller
+$ daybreak prune STATE.md --keep-last 8 --write
+backup /home/me/journal/STATE.md.prune-bak; archive /home/me/journal/STATE-archive.md
+```
+
+Selectors: `--keep-last N` (keep newest N session entries) or
+`--before sNN` (strictly older than sNN); mutually exclusive. Exit codes:
+`0` ok (whether or not blocks moved) · `2` usage/IO error.
+Note: `digest`/`dupes`/`stats` remain read-only — `prune` is the one
+daybreak command that writes, and only with `--write`.
+
 ## Install
 
 Zero dependencies beyond Python 3.10+ stdlib; `verify` shells out to `git`.
@@ -92,13 +117,16 @@ daybreak digest FILE... [--budget N] [--json] [--no-header]
 daybreak verify FILE... [--projects-root DIR] [--remote] [--run-tests] [--json]
 daybreak dupes  FILE... [--jaccard F] [--ratio F] [--json]
 daybreak stats  FILE...
+daybreak prune  JOURNAL [--keep-last N | --before sNN] [--write] [--archive PATH] [--json]
 ```
 
 `FILE` may be a file or a directory (expands to top-level `*.md`).
 
 ## Design notes
 
-- **Read-only.** daybreak never edits your journals.
+- **Read-only by default.** Only `prune --write` modifies anything, and it
+  backs up + archives before touching the original; everything else never
+  edits your journals.
 - **Deterministic.** Stable sort keys `(score, path, line)`; injectable
   clock via `--today` makes output reproducible near boundaries.
 - **Budget contract.** Must-keeps are never trimmed below legibility; if

@@ -86,6 +86,10 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
 - [x] M1 — parser + scoring + `digest` (budget packing, JSON mode)
 - [x] M2 — `verify` (repo/tag/date claims, exit-code contract)
 - [x] M3 — `dupes` + `stats`, README/LICENSE, publish + tag v1.0
+- [x] M4 — `prune` (decay axis): archive stale Completed entries to a
+  sibling archive file; byte-splice so other sections are untouched;
+  dry-run default, `--write` = backup → atomic replace → append archive;
+  markerless entries never move; idempotent (tag v1.1.0)
 
 ## Gotchas learned
 
@@ -96,3 +100,6 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
 - `git rev-list @{u}..HEAD` throws when no upstream exists — catch and
   downgrade to WARN.
 - Dupes O(n²): token-Jaccard prefilter before any SequenceMatcher call.
+- Prune blocks own their trailing blank lines, so removal leaves the
+  surrounding file byte-identical — splice back-to-front by start offset
+  and never rebuild the file from a parsed model.

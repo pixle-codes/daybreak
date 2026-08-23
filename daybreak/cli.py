@@ -1,4 +1,4 @@
-"""daybreak CLI — digest | verify | stats | dupes.
+"""daybreak CLI — digest | verify | stats | dupes | prune.
 
 Exit codes: 0 = clean, 1 = findings (verify errors / dupes found),
 2 = usage or IO errors.
@@ -12,7 +12,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from . import __version__, digest as _digest, dupes as _dupes
+from . import __version__, digest as _digest, dupes as _dupes, prune as _prune
 from .parser import parse_paths
 from .verify import verify
 
@@ -89,6 +89,47 @@ def cmd_dupes(args) -> int:
     return 1 if pairs else 0
 
 
+def cmd_prune(args) -> int:
+    if args.keep_last is not None and args.before is not None:
+        return _die("--keep-last and --before are mutually exclusive")
+    if args.keep_last is not None and args.keep_last < 1:
+        return _die("--keep-last must be >= 1")
+    if args.before is not None and args.before < 0:
+        return _die("--before must be a session number, sNN")
+    journal = Path(args.journal)
+    if not journal.is_file():
+        return _die(f"no such file: {journal}")
+    old_text = journal.read_text(encoding="utf-8", errors="replace")
+    new_text, moves = _prune.prune_lines(
+        old_text, keep_last=args.keep_last or 10, before=args.before)
+    if args.json:
+        print(json.dumps({
+            "mode": "write" if args.write else "dry-run",
+            "moved": len(moves),
+            "blocks": [{k: m[k] for k in ("session", "head")} for m in moves],
+            "bytes_before": len(old_text),
+            "bytes_after": len(new_text),
+        }, indent=2))
+    else:
+        for m in moves:
+            print(f"  [s{m['session']}] {m['head']}")
+        label = "archived" if args.write else "would archive"
+        print(f"{label} {len(moves)} block(s), "
+              f"{len(old_text) - len(new_text)} bytes smaller")
+    if not moves:
+        if not args.json:
+            print("nothing to do")
+        return 0
+    if not args.write:
+        return 0
+    archive = (Path(args.archive) if args.archive else
+               journal.with_name(journal.stem + "-archive" + journal.suffix))
+    info = _prune.apply_prune(journal, new_text, moves, archive, old_text)
+    if not args.json:
+        print(f"backup {info['backup']}; archive {info['archive']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="daybreak",
@@ -128,6 +169,20 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--ratio", type=float, default=0.88)
     u.add_argument("--json", action="store_true")
     u.set_defaults(func=cmd_dupes)
+
+    pr = sub.add_parser("prune",
+                        help="archive stale Completed entries (decay)")
+    pr.add_argument("journal", help="journal .md file (single file)")
+    pr.add_argument("--keep-last", type=int, default=None,
+                    help="keep the newest N session entries (default 10)")
+    pr.add_argument("--before", type=int, default=None, metavar="sNN",
+                    help="archive sessions strictly older than sNN")
+    pr.add_argument("--write", action="store_true",
+                    help="apply changes (default: dry-run)")
+    pr.add_argument("--archive", default=None,
+                    help="archive file (default: <journal>-archive.md)")
+    pr.add_argument("--json", action="store_true")
+    pr.set_defaults(func=cmd_prune)
     return p
 
 
