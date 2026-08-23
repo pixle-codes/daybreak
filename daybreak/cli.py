@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import __version__, digest as _digest, dupes as _dupes, prune as _prune
 from .parser import parse_paths
-from .verify import verify
+from .verify import statusline, verify
 
 
 def _die(msg: str) -> int:
@@ -42,11 +42,16 @@ def cmd_digest(args) -> int:
 
 def cmd_verify(args) -> int:
     try:
-        entries = parse_paths(args.files)
-    except FileNotFoundError as exc:
+        today = date.fromisoformat(args.today) if args.today else None
+        entries = parse_paths(args.files, today=today)
+    except (FileNotFoundError, ValueError) as exc:
         return _die(str(exc))
     report = verify(entries, projects_root=args.projects_root,
-                    remote=args.remote, run_tests=args.run_tests)
+                    remote=args.remote, run_tests=args.run_tests,
+                    today=today, max_age_days=args.max_age_days)
+    if args.statusline:
+        print(statusline(report))
+        return report.exit_code()
     if args.json:
         print(json.dumps(report.to_json(), indent=2))
     else:
@@ -155,7 +160,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also check tags are pushed (network)")
     v.add_argument("--run-tests", action="store_true",
                    help="run claimed test suites and compare counts")
+    v.add_argument("--max-age-days", type=int, default=None, metavar="N",
+                   help="error when the newest dated entry is older than N days")
+    v.add_argument("--statusline", action="store_true",
+                   help="single-line summary (cron/alerting)")
     v.add_argument("--json", action="store_true")
+    v.add_argument("--today", help="override today, YYYY-MM-DD (tests)")
     v.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("stats", help="corpus statistics (JSON)")

@@ -48,6 +48,7 @@ Extracts checkable claims and tests them:
 | `projects/<name>` / `github.com/<owner>/<name>` | directory exists · is a git repo · tree clean · commits pushed |
 | `vX.Y.Z` + ship verb + repo ref | tag exists locally (`--remote`: also pushed to origin) |
 | `N tests green` | with `--run-tests`: runs the suite and compares |
+| journal freshness (`--max-age-days N`) | newest dated entry is at most N days old |
 
 Honest journals are handled: a ship claim negated in prose ("NO TAG YET")
 downgrades to a note instead of failing.
@@ -61,6 +62,31 @@ summary: 1 errors, 0 warnings     # exit code 1 — CI/hook friendly
 ```
 
 Exit codes: `0` clean · `1` contradictions found · `2` usage/IO error.
+
+#### Nightly self-check recipe
+
+`verify` is built to run unattended. One cron line catches every silent rot
+mode this tool knows about — dirty trees, unpushed work, missing tags,
+stale journals:
+
+```console
+# crontab -e  — 05:12 daily
+12 5 * * * python3 -m daybreak verify ~/journal/*.md --remote --max-age-days 3 --statusline >> ~/daybreak.log 2>&1 || echo "journal check FAILED, see ~/daybreak.log" | mail -s daybreak you@example.com
+```
+
+- `--statusline` prints exactly one line (`daybreak OK: ...` /
+  `daybreak FAIL: <count> errors — [kind] first-finding`) so logs stay
+  greppable; the non-zero exit drives the alert.
+- `--remote` adds per-tag push checks (network); drop it if the machine
+  is offline at that hour.
+- `--max-age-days 3` fails when the journal itself stopped being updated
+  (the "agent went quiet" signal) — tune to your session cadence.
+- systemd equivalent: a `daybreak.service` (`Type=oneshot`,
+  `ExecStart=/usr/bin/env python3 -m daybreak verify ...`) plus an
+  `OnCalendar=*-*-* 05:12:00` timer works the same way.
+
+Dogfood loop for interactive sessions: run `verify` right after pushing;
+a clean exit is what licenses writing "SHIPPED" into the journal.
 
 ### `dupes` — catch repeated lessons
 

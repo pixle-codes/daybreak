@@ -7,7 +7,7 @@ from pathlib import Path
 
 from daybreak.parser import parse_text
 from daybreak.verify import (extract_repo_names, verify, _check_repo,
-                             Finding)
+                              Finding, statusline)
 
 TODAY = date(2026, 8, 23)
 
@@ -147,6 +147,79 @@ class TestVerify(unittest.TestCase):
         data = verify(es, projects_root=self.root).to_json()
         self.assertIn("findings", data)
         self.assertIn("summary", data)
+
+
+class TestFreshness(unittest.TestCase):
+    def _md(self, body):
+        return parse_text(body, today=TODAY)
+
+    def test_stale_journal_is_error(self):
+        es = self._md("- entry from long ago Aug 1 2026\n")
+        rep = verify(es, max_age_days=7, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertEqual(len(fresh), 1)
+        self.assertEqual(fresh[0].severity, "error")
+        self.assertEqual(rep.exit_code(), 1)
+
+    def test_recent_journal_is_ok(self):
+        es = self._md(f"- fresh entry {TODAY.isoformat()}\n")
+        rep = verify(es, max_age_days=7, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertEqual(fresh[0].severity, "ok")
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_boundary_exactly_max_age_passes(self):
+        es = self._md("- boundary entry Aug 16 2026\n")
+        rep = verify(es, max_age_days=7, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertEqual(fresh[0].severity, "ok")
+
+    def test_no_dated_entries_warns_not_errors(self):
+        es = self._md("- undated entry with no claims at all\n")
+        rep = verify(es, max_age_days=7, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertEqual(fresh[0].severity, "warn")
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_future_dates_ignored_for_freshness(self):
+        # Sep 20 resolves to a past occurrence (2025) relative to TODAY,
+        # so use an explicit future date instead.
+        es = self._md("- future entry 2099-01-01\n")
+        rep = verify(es, max_age_days=7, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertEqual(fresh[0].severity, "warn")  # nothing dated <= today
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_off_by_default(self):
+        es = self._md("- old entry Aug 1 2026\n")
+        rep = verify(es, today=TODAY)
+        self.assertEqual([f for f in rep.findings if f.kind == "fresh"], [])
+
+    def test_where_points_at_newest_entry(self):
+        es = self._md("- old entry Aug 1 2026\n"
+                      "- newer entry Aug 20 2026\n")
+        rep = verify(es, max_age_days=2, today=TODAY)
+        fresh = [f for f in rep.findings if f.kind == "fresh"]
+        self.assertTrue(fresh[0].where.endswith(":2"))
+
+
+class TestStatusline(unittest.TestCase):
+    def test_ok_line_when_clean(self):
+        es = parse_text("- nothing checkable here\n", today=TODAY)
+        line = statusline(verify(es, max_age_days=30, today=TODAY))
+        self.assertTrue(line.startswith("daybreak OK:"))
+        self.assertNotIn("FAIL", line)
+
+    def test_fail_line_carries_first_error(self):
+        es = parse_text("- see projects/ghost\nAug 1 2026 note\n",
+                        today=TODAY)
+        rep = verify(es, max_age_days=3, today=TODAY)
+        line = statusline(rep)
+        self.assertTrue(line.startswith("daybreak FAIL:"))
+        # one-line contract: counts + FIRST error only (repo sorts before fresh)
+        self.assertIn("[repo]", line)
+        self.assertNotIn("[fresh]", line)
+        self.assertIn("2 errors", line)  # both errors still counted
 
 
 if __name__ == "__main__":

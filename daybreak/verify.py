@@ -219,9 +219,46 @@ def _check_test_counts(entries, projects_root: Path, run_tests: bool):
     return findings
 
 
+def _check_freshness(entries, max_age_days: int, today: date):
+    """Newest dated entry older than max_age_days => error.
+
+    Detects the silent-rot case where the journal itself stopped being
+    maintained while everything it claims still looks true. Future-dated
+    entries are ignored (they cannot prove freshness). No dated entries
+    at all => warn, never error (undated journals are a style, not a lie).
+    """
+    where = entries[0].key if entries else "<memory>:0"
+    dated = [(d, e) for e in entries for d in e.dates if d <= today]
+    if not dated:
+        return [Finding("warn", "fresh", "journal freshness",
+                        "no dated entries found; freshness unknown", where)]
+    newest, newest_entry = max(dated, key=lambda de: de[0])
+    age = (today - newest).days
+    where = newest_entry.key
+    if age > max_age_days:
+        return [Finding("error", "fresh", f"newest entry {age}d old",
+                        f"last journal update {newest.isoformat()} is older "
+                        f"than --max-age-days {max_age_days}", where)]
+    return [Finding("ok", "fresh", "journal freshness",
+                    f"newest entry {age}d old ({newest.isoformat()})", where)]
+
+
+def statusline(report: VerifyReport) -> str:
+    """One-line summary for cron/alerting (family convention)."""
+    s = report.to_json()["summary"]
+    n = len(report.findings)
+    if report.errors:
+        first = report.errors[0]
+        return (f"daybreak FAIL: {s['errors']} errors, {s['warnings']} warn "
+                f"— [{first.kind}] {first.claim}: {first.detail}")
+    return f"daybreak OK: {n} checks, {s['errors']} errors, {s['warnings']} warn"
+
+
 def verify(entries, projects_root="~/projects", remote: bool = False,
-           run_tests: bool = False, today: date | None = None) -> VerifyReport:
+           run_tests: bool = False, today: date | None = None,
+           max_age_days: int | None = None) -> VerifyReport:
     root = Path(projects_root).expanduser()
+    today = today or date.today()
     report = VerifyReport()
     for name in extract_repo_names(entries):
         # attribute finding to first entry mentioning it
@@ -230,4 +267,6 @@ def verify(entries, projects_root="~/projects", remote: bool = False,
         report.findings.extend(_check_repo(name, root, remote, where))
     report.findings.extend(_check_ship_claims(entries, root, remote))
     report.findings.extend(_check_test_counts(entries, root, run_tests))
+    if max_age_days is not None:
+        report.findings.extend(_check_freshness(entries, max_age_days, today))
     return report

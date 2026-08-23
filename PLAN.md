@@ -90,6 +90,11 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   sibling archive file; byte-splice so other sections are untouched;
   dry-run default, `--write` = backup → atomic replace → append archive;
   markerless entries never move; idempotent (tag v1.1.0)
+- [x] M5 — watchdog axis for unattended runs: `--statusline` one-liner
+  (family convention), `--max-age-days N` journal-freshness check
+  (future-dated entries ignored; undated journals warn, never error),
+  `--today` wired through verify CLI; README nightly cron recipe
+  (tag v1.2.0)
 
 ## Gotchas learned
 
