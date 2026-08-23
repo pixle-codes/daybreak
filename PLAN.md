@@ -102,6 +102,19 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   pinned by test (flag → prune --write → clean). Motivation: prune sat
   unused since v1.1.0 because nothing ever signaled it was due — the
   live STATE.md grew to ~66 inline entries. (tag v1.3.0)
+- [x] M7 — claim attribution (s76): ship-claim and test-count binding
+  rebuilt line-scoped. The nearest `projects/<repo>` ref ON THE
+  VERSION'S LINE owns the claim, so a long entry's `cd
+  ~/projects/other` recipe can never steal a title-shape "reponame
+  vX.Y.Z shipped" claim (live false-block hit s75: verify demanded a
+  tag in the wrong repo and honest prose had to be reordered to pass).
+  Ship verb required on the version's own line (casual mentions on
+  verbless lines skipped); EVERY distinct version in an entry is
+  checked (was: first only); unattributable claims in multi-repo
+  entries downgrade to WARN with pin-it advice — a gate must never
+  false-block prose it cannot attribute. Live dogfood: all 30 tag
+  claims on real STATE.md bound to the right repos incl. three
+  versions inside one entry. (tag v1.4.0)
 
 ## Gotchas learned
 

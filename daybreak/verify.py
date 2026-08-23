@@ -84,18 +84,52 @@ def _git(args, cwd, timeout=15):
         return None
 
 
+def _norm_gh_name(m) -> str:
+    n = m.group(2)
+    if "/" in n:  # trailing .git / path fragments
+        n = n.split("/")[0]
+    return n.removesuffix(".git")
+
+
+def _repo_refs_with_pos(text: str) -> list[tuple[str, int]]:
+    """All repo refs as (name, char_position), sorted by position."""
+    out = [(m.group(1).rstrip("."), m.start())
+           for m in _REPO_RE.finditer(text)]
+    out += [(_norm_gh_name(m), m.start()) for m in _GH_RE.finditer(text)]
+    out.sort(key=lambda np: np[1])
+    return out
+
+
+def _line_bounds(text: str, pos: int) -> tuple[int, int]:
+    start = text.rfind("\n", 0, pos) + 1
+    end = text.find("\n", pos)
+    return start, (len(text) if end == -1 else end)
+
+
+def _bind_repo_on_line(text: str, pos: int) -> str | None:
+    """Repo ref on the same line as `pos`, nearest wins (ties: earliest)."""
+    lo, hi = _line_bounds(text, pos)
+    refs = [(n, p) for n, p in _repo_refs_with_pos(text) if lo <= p < hi]
+    if not refs:
+        return None
+    refs.sort(key=lambda np: (abs(np[1] - pos), np[1]))
+    return refs[0][0]
+
+
+def _distinct(names: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
 def extract_repo_names(entries) -> list[str]:
     names: list[str] = []
     for e in entries:
-        for m in _REPO_RE.finditer(e.text):
-            n = m.group(1).rstrip(".")
-            if n not in names:
-                names.append(n)
-        for m in _GH_RE.finditer(e.text):
-            n = m.group(2)
-            if "/" in n:  # trailing .git / path fragments
-                n = n.split("/")[0]
-            n = n.removesuffix(".git")
+        for n, _ in _repo_refs_with_pos(e.text):
             if n not in names:
                 names.append(n)
     return names
@@ -138,45 +172,78 @@ def _check_repo(name: str, projects_root: Path, remote: bool, where: str):
 
 
 def _check_ship_claims(entries, projects_root: Path, remote: bool):
-    """vX.Y.Z + ship verb + repo ref in the same entry => tag must exist."""
+    """vX.Y.Z + ship verb ON THE VERSION'S OWN LINE => tag must exist.
+
+    Attribution ladder (v1.4.0): the nearest repo ref on the version's
+    line wins — title-shape prose ("reponame vX.Y.Z shipped") pins
+    exactly, so a `cd ~/projects/other` recipe elsewhere in a long
+    entry can never steal the claim. If the line names no repo, fall
+    back to the entry's first ref ONLY when unambiguous; multi-repo
+    entries stay UNVERIFIED at WARN (a gate must not false-block honest
+    prose it cannot attribute — mention projects/<repo> beside the
+    version to pin it). Casual version mentions on verbless lines are
+    skipped entirely.
+    """
     findings = []
     for e in entries:
-        vm = _VERSION_RE.search(e.text)
-        if not vm or not _SHIP_VERB_RE.search(e.text):
+        text = e.text
+        if not _VERSION_RE.search(text) or not _SHIP_VERB_RE.search(text):
             continue
-        if _NEGATION_RE.search(e.text):
-            findings.append(Finding(
-                "info", "tag", f"v{vm.group(1)}.{vm.group(2)}.{vm.group(3)}",
-                "ship claim explicitly negated in prose; skipped", e.key))
-            continue
-        rm = _REPO_RE.search(e.text) or _GH_RE.search(e.text)
-        if not rm:
-            continue
-        repo_name = (_REPO_RE.search(e.text).group(1) if _REPO_RE.search(e.text)
-                     else _GH_RE.search(e.text).group(2).removesuffix(".git"))
-        version = f"v{vm.group(1)}.{vm.group(2)}.{vm.group(3)}"
-        repo = projects_root / repo_name
-        if not (repo / ".git").exists():
-            continue  # repo-level finding already covers this
-        tag = _git(["tag", "-l", version], repo)
-        if tag is None or tag.returncode != 0:
-            findings.append(Finding("warn", "tag", version,
-                                    f"could not list tags in {repo_name}",
-                                    e.key))
-        elif not tag.stdout.strip():
-            findings.append(Finding("error", "tag", version,
-                                    f"claim says shipped/tagged but no local "
-                                    f"tag {version} in {repo_name}", e.key))
-        else:
-            findings.append(Finding("ok", "tag", version,
-                                    f"local tag exists in {repo_name}", e.key))
-            if remote:
-                ls = _git(["ls-remote", "--tags", "origin", version], repo,
-                          timeout=30)
-                if ls and ls.returncode == 0 and not ls.stdout.strip():
-                    findings.append(Finding(
-                        "error", "tag", version,
-                        f"tag exists locally but NOT pushed to origin", e.key))
+        negated = bool(_NEGATION_RE.search(text))
+        refs_all = _distinct([n for n, _ in _repo_refs_with_pos(text)])
+        first_ref = refs_all[0] if refs_all else None
+        checked: set[tuple[str, str]] = set()
+        for vm in _VERSION_RE.finditer(text):
+            version = f"v{vm.group(1)}.{vm.group(2)}.{vm.group(3)}"
+            lo, hi = _line_bounds(text, vm.start())
+            if not _SHIP_VERB_RE.search(text[lo:hi]):
+                continue  # casual mention, not a claim
+            if negated:
+                findings.append(Finding(
+                    "info", "tag", version,
+                    "ship claim explicitly negated in prose; skipped", e.key))
+                continue
+            repo_name = _bind_repo_on_line(text, vm.start())
+            ambiguous = False
+            if repo_name is None:
+                if first_ref is None:
+                    continue
+                ambiguous = len(refs_all) > 1
+                repo_name = first_ref
+            pair = (version, repo_name)
+            if pair in checked:
+                continue
+            checked.add(pair)
+            repo = projects_root / repo_name
+            if not (repo / ".git").exists():
+                continue  # repo-level finding already covers this
+            if ambiguous:
+                findings.append(Finding(
+                    "warn", "tag", version,
+                    f"ship claim unverifiable: entry names "
+                    f"{len(refs_all)} repos and none sits on the version's "
+                    f"line (closest guess {repo_name}); write "
+                    f"projects/<repo> beside {version} to pin", e.key))
+                continue
+            tag = _git(["tag", "-l", version], repo)
+            if tag is None or tag.returncode != 0:
+                findings.append(Finding("warn", "tag", version,
+                                        f"could not list tags in {repo_name}",
+                                        e.key))
+            elif not tag.stdout.strip():
+                findings.append(Finding("error", "tag", version,
+                                        f"claim says shipped/tagged but no local "
+                                        f"tag {version} in {repo_name}", e.key))
+            else:
+                findings.append(Finding("ok", "tag", version,
+                                        f"local tag exists in {repo_name}", e.key))
+                if remote:
+                    ls = _git(["ls-remote", "--tags", "origin", version], repo,
+                              timeout=30)
+                    if ls and ls.returncode == 0 and not ls.stdout.strip():
+                        findings.append(Finding(
+                            "error", "tag", version,
+                            f"tag exists locally but NOT pushed to origin", e.key))
     return findings
 
 
@@ -187,16 +254,25 @@ def _check_test_counts(entries, projects_root: Path, run_tests: bool):
         if not m:
             continue
         claimed = int(m.group(1) or m.group(2))
-        rm = _REPO_RE.search(e.text) or _GH_RE.search(e.text)
-        repo_name = None
-        if rm:
-            repo_name = (_REPO_RE.search(e.text).group(1) if _REPO_RE.search(e.text)
-                         else _GH_RE.search(e.text).group(2).removesuffix(".git"))
+        repo_name = _bind_repo_on_line(e.text, m.start())
+        ambiguous = False
+        if repo_name is None:
+            refs_all = _distinct([n for n, _ in _repo_refs_with_pos(e.text)])
+            if len(refs_all) == 1:
+                repo_name = refs_all[0]
+            elif refs_all:
+                ambiguous = True
         if not run_tests:
             findings.append(Finding(
                 "info", "tests", str(claimed),
                 f"claimed test count{f' for {repo_name}' if repo_name else ''} "
                 f"(use --run-tests to verify)", e.key))
+            continue
+        if ambiguous:
+            findings.append(Finding(
+                "warn", "tests", str(claimed),
+                "cannot attribute test count to one repo unambiguously; "
+                "mention projects/<repo> on the same line", e.key))
             continue
         target = projects_root / repo_name if repo_name else None
         if not target or not (target / "tests").is_dir():

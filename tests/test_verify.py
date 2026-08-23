@@ -109,6 +109,108 @@ class TestVerify(unittest.TestCase):
         rep = verify(es, projects_root=self.root, today=TODAY)
         self.assertEqual([f for f in rep.findings if f.kind == "tag"], [])
 
+    def test_verb_elsewhere_but_not_on_version_line_is_skipped(self):
+        # s75 regression class: entry-wide verb steals a casual mention.
+        make_repo(self.root, "casual", tag="v1.0.0")
+        md = ("- released v1.0.0 of projects/casual\n"
+              "  battery mentions v2.0.0 incidentally\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tags = [f for f in rep.findings if f.kind == "tag"]
+        self.assertEqual([t.claim for t in tags], ["v1.0.0"])
+
+    def test_line_level_binding_beats_first_ref(self):
+        # THE s75 bug: first-ref recipe repo must not steal the claim.
+        make_repo(self.root, "rightone", tag="v0.9.9")   # first ref HAS tag
+        make_repo(self.root, "wrongone")                 # claimed repo does NOT
+        md = ("- NEXT: cd ~/projects/rightone && python3 -m rightone\n"
+              "  shipped v0.9.9 of projects/wrongone\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_errors = [f for f in rep.errors if f.kind == "tag"]
+        self.assertEqual(len(tag_errors), 1)
+        self.assertIn("wrongone", tag_errors[0].detail)
+
+    def test_nearest_ref_on_same_line_wins(self):
+        make_repo(self.root, "left")
+        make_repo(self.root, "right")
+        md = "- compare projects/left and projects/right: shipped v3.2.1\n"
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_errors = [f for f in rep.errors if f.kind == "tag"]
+        self.assertEqual(len(tag_errors), 1)
+        self.assertIn("in right", tag_errors[0].detail)
+
+    def test_github_ref_binds_on_line(self):
+        make_repo(self.root, "ghrepo")
+        md = "- shipped v1.0.0, see github.com/pixle-codes/ghrepo\n"
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_errors = [f for f in rep.errors if f.kind == "tag"]
+        self.assertEqual(len(tag_errors), 1)
+        self.assertIn("ghrepo", tag_errors[0].detail)
+
+    def test_multi_repo_no_line_ref_is_warn_never_error(self):
+        make_repo(self.root, "alpha")
+        make_repo(self.root, "beta")
+        md = ("- worked across projects/alpha and projects/beta all day;\n"
+              "  later: shipped v5.5.5 finally\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_findings = [f for f in rep.findings if f.kind == "tag"]
+        self.assertEqual(len(tag_findings), 1)
+        self.assertEqual(tag_findings[0].severity, "warn")
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_single_repo_entry_fallback_still_checks(self):
+        make_repo(self.root, "only")
+        md = ("- hacked on projects/only all day\n"
+              "  later: shipped v7.7.7\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_errors = [f for f in rep.errors if f.kind == "tag"]
+        self.assertEqual(len(tag_errors), 1)
+
+    def test_duplicate_versions_dedupe(self):
+        make_repo(self.root, "dup")
+        md = ("- shipped v1.1.1 of projects/dup; shipped v1.1.1 again\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tags = [f for f in rep.findings if f.kind == "tag"]
+        self.assertEqual(len(tags), 1)
+
+    def test_distinct_versions_each_checked(self):
+        make_repo(self.root, "multi")
+        md = ("- shipped v1.0.0 then shipped v2.0.0 of projects/multi\n")
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY)
+        tag_errors = [f for f in rep.errors if f.kind == "tag"]
+        self.assertEqual({t.claim for t in tag_errors},
+                         {"v1.0.0", "v2.0.0"})
+
+    def test_test_count_line_binding(self):
+        make_repo(self.root, "counted")
+        make_repo(self.root, "other")
+        md = ("- swept projects/other too\n"
+              "  42 stdlib tests green in projects/counted\n")
+        es = parse_text(md, today=TODAY, )
+        rep = verify(es, projects_root=self.root,
+                     run_tests=False, today=TODAY)
+        notes = [f for f in rep.findings if f.kind == "tests"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("for counted", notes[0].detail)
+
+    def test_remote_unpushed_tag_still_error_after_binding(self):
+        make_repo(self.root, "pushed", tag="v1.5.0")
+        md = "- shipped v1.5.0 of projects/pushed\n"
+        es = parse_text(md, today=TODAY)
+        # no origin remote -> ls-remote fails silently (returns None-ish);
+        # pin that this path stays a no-warn ok finding
+        rep = verify(es, projects_root=self.root, remote=True, today=TODAY)
+        oks = [f for f in rep.findings
+               if f.kind == "tag" and f.severity == "ok"]
+        self.assertEqual(len(oks), 1)
+
     def test_test_count_info_without_run_tests_flag(self):
         make_repo(self.root, "tested")
         md = "- 42 stdlib tests green in projects/tested\n"

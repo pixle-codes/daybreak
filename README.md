@@ -46,12 +46,18 @@ Extracts checkable claims and tests them:
 | Claim | Check |
 |---|---|
 | `projects/<name>` / `github.com/<owner>/<name>` | directory exists · is a git repo · tree clean · commits pushed |
-| `vX.Y.Z` + ship verb + repo ref | tag exists locally (`--remote`: also pushed to origin) |
-| `N tests green` | with `--run-tests`: runs the suite and compares |
+| `vX.Y.Z` + ship verb on the same line | tag exists locally (`--remote`: also pushed to origin), checked against the repo named nearest on that line |
+| `N tests green` | with `--run-tests`: runs the suite and compares (same line-level attribution) |
 | journal freshness (`--max-age-days N`) | newest dated entry is at most N days old |
 
 Honest journals are handled: a ship claim negated in prose ("NO TAG YET")
-downgrades to a note instead of failing.
+downgrades to a note instead of failing. Version claims bind to the repo
+ref on their own line — so a long entry's `cd ~/projects/other` recipe can
+never steal a "reponame vX.Y.Z shipped" title claim. If the version's line
+names no repo and the entry mentions several, the claim is reported as an
+unverifiable warning (never a failure): write `projects/<repo>` beside the
+version to pin it. Casual version mentions on lines without a ship verb
+are ignored entirely; every distinct version in an entry gets its own check.
 
 ```console
 $ daybreak verify ~/journal/STATE.md --projects-root ~/projects
