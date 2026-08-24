@@ -48,7 +48,8 @@ def cmd_verify(args) -> int:
         return _die(str(exc))
     report = verify(entries, projects_root=args.projects_root,
                     remote=args.remote, run_tests=args.run_tests,
-                    today=today, max_age_days=args.max_age_days)
+                    today=today, max_age_days=args.max_age_days,
+                    ignore=getattr(args, "ignore", None))
     if getattr(args, "max_completed", None) is not None:
         if args.max_completed < 0:
             return _die("--max-completed must be >= 0")
@@ -182,6 +183,9 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--max-completed", type=int, default=None, metavar="N",
                    help="error when a Completed section holds more than N "
                         "inline entries (bloat watchdog; repair via prune)")
+    v.add_argument("--ignore", action="append", default=[], metavar="NAME",
+                   help="exclude repo NAME from all checks (repeatable) — "
+                        "for shared-machine repos that are not yours to gate")
     v.add_argument("--statusline", action="store_true",
                    help="single-line summary (cron/alerting)")
     v.add_argument("--json", action="store_true")

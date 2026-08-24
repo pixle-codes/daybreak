@@ -324,5 +324,72 @@ class TestStatusline(unittest.TestCase):
         self.assertIn("2 errors", line)  # both errors still counted
 
 
+class TestIgnore(unittest.TestCase):
+    """v1.5.0 --ignore: shared-machine repos the journal owner can't gate."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_ignore_suppresses_repo_findings(self):
+        make_repo(self.root, "foreign", dirty=True)
+        es = parse_text("- touch projects/foreign\n", today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY,
+                     ignore=["foreign"])
+        self.assertEqual([f for f in rep.findings if f.kind == "repo"], [])
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_extract_repo_names_respects_ignore(self):
+        md = "- projects/keep and projects/skip here\n"
+        es = parse_text(md, today=TODAY)
+        self.assertEqual(extract_repo_names(es, ignore=["skip"]),
+                         ["keep"])
+
+    def test_pinned_claim_to_missing_ignored_repo_is_info_only(self):
+        # repo doesn't even exist: no repo error, no tag error — one info.
+        md = "- shipped v1.0.0 of projects/ghostish\n"
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY,
+                     ignore=["ghostish"])
+        self.assertEqual(rep.errors, [])
+        infos = [f for f in rep.findings if f.severity == "info"]
+        self.assertEqual(len(infos), 1)
+        self.assertIn("--ignore", infos[0].detail)
+
+    def test_attribution_ignores_excluded_names(self):
+        make_repo(self.root, "mine", tag="v2.0.0")
+        md = ("- shipped v2.0.0 today\n"
+              "  worked across projects/mine and projects/foreign\n")
+        es = parse_text(md, today=TODAY)
+        base = verify(es, projects_root=self.root, today=TODAY)
+        self.assertTrue(any(f.severity == "warn" for f in
+                            [x for x in base.findings if x.kind == "tag"]))
+        rep = verify(es, projects_root=self.root, today=TODAY,
+                     ignore=["foreign"])
+        tags = [f for f in rep.findings if f.kind == "tag"]
+        self.assertTrue(all(f.severity == "ok" for f in tags))
+        self.assertEqual(rep.exit_code(), 0)
+
+    def test_test_count_pinned_to_ignored_repo_is_info(self):
+        md = "- 43 tests green in projects/foreign\n"
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY,
+                     run_tests=True, ignore=["foreign"])
+        tests = [f for f in rep.findings if f.kind == "tests"]
+        self.assertEqual(len(tests), 1)
+        self.assertEqual(tests[0].severity, "info")
+
+    def test_without_ignore_behavior_unchanged(self):
+        make_repo(self.root, "plain", dirty=True)
+        md = "- shipped v9.9.9 of projects/plain\n"
+        es = parse_text(md, today=TODAY)
+        rep = verify(es, projects_root=self.root, today=TODAY,
+                     ignore=[])
+        self.assertTrue(rep.errors)  # dirty + missing tag both still fire
+
+
 if __name__ == "__main__":
     unittest.main()

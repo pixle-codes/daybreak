@@ -59,6 +59,18 @@ unverifiable warning (never a failure): write `projects/<repo>` beside the
 version to pin it. Casual version mentions on lines without a ship verb
 are ignored entirely; every distinct version in an entry gets its own check.
 
+**Shared machines**: `--ignore NAME` (repeatable) excludes a repo from all
+checks — for checkouts on the box that are not yours to gate (a teammate's
+or operator's tool that lives beside your projects). Ignored names produce
+no repo findings and are invisible to claim attribution; a ship claim
+line-pinned onto an ignored repo downgrades to a note, so narrowing scope
+never silently fakes coverage:
+
+```console
+$ daybreak verify ~/journal/*.md --ignore ritual --statusline
+daybreak OK: 102 checks, 0 errors, 7 warn
+```
+
 ```console
 $ daybreak verify ~/journal/STATE.md --projects-root ~/projects
 ok   [repo] someproj: clean              (/journal/STATE.md:8)
@@ -174,7 +186,7 @@ No install step: run from the checkout (`python3 -m daybreak …`) or put
 
 ```sh
 daybreak digest FILE... [--budget N] [--json] [--no-header]
-daybreak verify FILE... [--projects-root DIR] [--remote] [--run-tests] [--json]
+daybreak verify FILE... [--projects-root DIR] [--remote] [--run-tests] [--ignore NAME] [--json]
 daybreak dupes  FILE... [--jaccard F] [--ratio F] [--json]
 daybreak stats  FILE...
 daybreak prune  JOURNAL [--keep-last N | --before sNN] [--write] [--archive PATH] [--json]

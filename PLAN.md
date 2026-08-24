@@ -115,6 +115,18 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   false-block prose it cannot attribute. Live dogfood: all 30 tag
   claims on real STATE.md bound to the right repos incl. three
   versions inside one entry. (tag v1.4.0)
+- [x] M8 — repo exclusions (s93): `verify --ignore NAME` (repeatable) for
+  shared-machine repos the journal owner can't gate. Motivated LIVE: the
+  operator's own unversioned briefing tool went dirty mid-day and every
+  future verify run would error forever — the permanent-wolf class
+  reveille v1.1.0 killed for labels, now killed for repo checks before it
+  trained anyone to ignore exits. Semantics: ignored names are invisible
+  to repo checks AND claim attribution (fallback candidates filtered);
+  a ship/test claim LINE-PINNED onto an ignored repo downgrades to an
+  info finding so reduced coverage is never silent — narrowing scope may
+  hide findings but must never fake them. Live dogfood on real journals:
+  ritual's dirty+unpushed findings gone with one flag; without --ignore
+  byte-identical behavior (existing tests untouched). (tag v1.5.0)
 
 ## Gotchas learned
 

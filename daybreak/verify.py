@@ -126,13 +126,20 @@ def _distinct(names: list[str]) -> list[str]:
     return out
 
 
-def extract_repo_names(entries) -> list[str]:
+def extract_repo_names(entries, ignore: list[str] | None = None) -> list[str]:
+    skipped = _ignore_set(ignore)
     names: list[str] = []
     for e in entries:
         for n, _ in _repo_refs_with_pos(e.text):
+            if n in skipped:
+                continue
             if n not in names:
                 names.append(n)
     return names
+
+
+def _ignore_set(ignore: list[str] | None) -> set[str]:
+    return {n.strip() for n in (ignore or []) if n.strip()}
 
 
 def _check_repo(name: str, projects_root: Path, remote: bool, where: str):
@@ -171,7 +178,8 @@ def _check_repo(name: str, projects_root: Path, remote: bool, where: str):
     return out
 
 
-def _check_ship_claims(entries, projects_root: Path, remote: bool):
+def _check_ship_claims(entries, projects_root: Path, remote: bool,
+                       ignore: list[str] | None = None):
     """vX.Y.Z + ship verb ON THE VERSION'S OWN LINE => tag must exist.
 
     Attribution ladder (v1.4.0): the nearest repo ref on the version's
@@ -182,15 +190,19 @@ def _check_ship_claims(entries, projects_root: Path, remote: bool):
     entries stay UNVERIFIED at WARN (a gate must not false-block honest
     prose it cannot attribute — mention projects/<repo> beside the
     version to pin it). Casual version mentions on verbless lines are
-    skipped entirely.
+    skipped entirely. Names passed via --ignore are invisible to
+    attribution AND to line-scoped pins; a pin onto an ignored repo
+    downgrades to an info finding so reduced coverage is never silent.
     """
+    skipped = _ignore_set(ignore)
     findings = []
     for e in entries:
         text = e.text
         if not _VERSION_RE.search(text) or not _SHIP_VERB_RE.search(text):
             continue
         negated = bool(_NEGATION_RE.search(text))
-        refs_all = _distinct([n for n, _ in _repo_refs_with_pos(text)])
+        refs_all = _distinct([n for n, _ in _repo_refs_with_pos(text)
+                              if n not in skipped])
         first_ref = refs_all[0] if refs_all else None
         checked: set[tuple[str, str]] = set()
         for vm in _VERSION_RE.finditer(text):
@@ -204,6 +216,14 @@ def _check_ship_claims(entries, projects_root: Path, remote: bool):
                     "ship claim explicitly negated in prose; skipped", e.key))
                 continue
             repo_name = _bind_repo_on_line(text, vm.start())
+            if repo_name is not None and repo_name in skipped:
+                if (version, repo_name) not in checked:
+                    checked.add((version, repo_name))
+                    findings.append(Finding(
+                        "info", "tag", version,
+                        f"claim pinned to projects/{repo_name}; excluded "
+                        f"via --ignore", e.key))
+                continue
             ambiguous = False
             if repo_name is None:
                 if first_ref is None:
@@ -247,7 +267,9 @@ def _check_ship_claims(entries, projects_root: Path, remote: bool):
     return findings
 
 
-def _check_test_counts(entries, projects_root: Path, run_tests: bool):
+def _check_test_counts(entries, projects_root: Path, run_tests: bool,
+                       ignore: list[str] | None = None):
+    skipped = _ignore_set(ignore)
     findings = []
     for e in entries:
         m = _TESTS_RE.search(e.text)
@@ -255,9 +277,16 @@ def _check_test_counts(entries, projects_root: Path, run_tests: bool):
             continue
         claimed = int(m.group(1) or m.group(2))
         repo_name = _bind_repo_on_line(e.text, m.start())
+        if repo_name is not None and repo_name in skipped:
+            findings.append(Finding(
+                "info", "tests", str(claimed),
+                f"claim pinned to projects/{repo_name}; excluded via "
+                f"--ignore", e.key))
+            continue
         ambiguous = False
         if repo_name is None:
-            refs_all = _distinct([n for n, _ in _repo_refs_with_pos(e.text)])
+            refs_all = _distinct([n for n, _ in _repo_refs_with_pos(e.text)
+                                  if n not in skipped])
             if len(refs_all) == 1:
                 repo_name = refs_all[0]
             elif refs_all:
@@ -366,17 +395,27 @@ def statusline(report: VerifyReport) -> str:
 
 def verify(entries, projects_root="~/projects", remote: bool = False,
            run_tests: bool = False, today: date | None = None,
-           max_age_days: int | None = None) -> VerifyReport:
+           max_age_days: int | None = None,
+           ignore: list[str] | None = None) -> VerifyReport:
+    """--ignore NAME (repeatable): repo refs to exclude from ALL checks.
+
+    For repos on a shared machine that are not the journal owner's to
+    gate (an operator's own tool, a foreign checkout). Ignored names
+    produce no repo findings and are invisible to claim attribution;
+    claims line-pinned onto them downgrade to info so narrowing scope
+    never silently fakes coverage.
+    """
     root = Path(projects_root).expanduser()
     today = today or date.today()
     report = VerifyReport()
-    for name in extract_repo_names(entries):
+    for name in extract_repo_names(entries, ignore):
         # attribute finding to first entry mentioning it
         where = next((e.key for e in entries
                       if name in e.text), "<memory>:0")
         report.findings.extend(_check_repo(name, root, remote, where))
-    report.findings.extend(_check_ship_claims(entries, root, remote))
-    report.findings.extend(_check_test_counts(entries, root, run_tests))
+    report.findings.extend(_check_ship_claims(entries, root, remote, ignore))
+    report.findings.extend(
+        _check_test_counts(entries, root, run_tests, ignore))
     if max_age_days is not None:
         report.findings.extend(_check_freshness(entries, max_age_days, today))
     return report
