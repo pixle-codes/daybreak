@@ -137,6 +137,9 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   keeps its legacy message byte-identically. Fail-fast by design:
   partial output over an unreadable corpus would fake coverage.
   Directory expansion names the exact unreadable .md. (tag v1.5.1)
+  Shipped s138; found by the same session's ritual as a standing item
+  from the s137 access-honesty drill — repro'd red-first, cured, and
+  dogfooded live (chmod-000 STATE copy → honest one-liner rc2).
 
 ## Gotchas learned
 
