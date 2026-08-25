@@ -22,11 +22,18 @@ def _die(msg: str) -> int:
     return 2
 
 
+def _unreadable(exc: OSError) -> int:
+    detail = f"{exc.strerror}: {exc.filename}" if exc.filename else str(exc)
+    return _die(f"cannot read: {detail}")
+
+
 def cmd_digest(args) -> int:
     try:
         entries = parse_paths(args.files)
     except FileNotFoundError as exc:
         return _die(str(exc))
+    except OSError as exc:
+        return _unreadable(exc)
     if not entries:
         return _die("no entries found in input")
     today = date.fromisoformat(args.today) if args.today else date.today()
@@ -46,6 +53,8 @@ def cmd_verify(args) -> int:
         entries = parse_paths(args.files, today=today)
     except (FileNotFoundError, ValueError) as exc:
         return _die(str(exc))
+    except OSError as exc:
+        return _unreadable(exc)
     report = verify(entries, projects_root=args.projects_root,
                     remote=args.remote, run_tests=args.run_tests,
                     today=today, max_age_days=args.max_age_days,
@@ -75,6 +84,8 @@ def cmd_stats(args) -> int:
         entries = parse_paths(args.files)
     except FileNotFoundError as exc:
         return _die(str(exc))
+    except OSError as exc:
+        return _unreadable(exc)
     data = _dupes.stats(entries)
     if args.today:
         data = {**data}  # stats() already used today internally via entries
@@ -87,6 +98,8 @@ def cmd_dupes(args) -> int:
         entries = parse_paths(args.files)
     except FileNotFoundError as exc:
         return _die(str(exc))
+    except OSError as exc:
+        return _unreadable(exc)
     pairs = _dupes.find_dupes(entries, jaccard_min=args.jaccard,
                               ratio_min=args.ratio)
     if args.json:
@@ -110,7 +123,10 @@ def cmd_prune(args) -> int:
     journal = Path(args.journal)
     if not journal.is_file():
         return _die(f"no such file: {journal}")
-    old_text = journal.read_text(encoding="utf-8", errors="replace")
+    try:
+        old_text = journal.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return _unreadable(exc)
     new_text, moves = _prune.prune_lines(
         old_text, keep_last=args.keep_last or 10, before=args.before)
     info = None

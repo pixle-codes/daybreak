@@ -81,6 +81,10 @@ summary: 1 errors, 0 warnings     # exit code 1 — CI/hook friendly
 
 Exit codes: `0` clean · `1` contradictions found · `2` usage/IO error.
 
+An unreadable input file (permissions) is an honest `2`: one line on
+stderr naming the path, no traceback, from every command — a partially
+read corpus never produces partial output.
+
 #### Nightly self-check recipe
 
 `verify` is built to run unattended. One cron line catches every silent rot

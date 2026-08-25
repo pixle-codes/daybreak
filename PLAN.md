@@ -128,6 +128,16 @@ journal.md ──parser──▶ Entry(section, line, text, tags, dates)
   ritual's dirty+unpushed findings gone with one flag; without --ignore
   byte-identical behavior (existing tests untouched). (tag v1.5.0)
 
+- [x] M9 — unreadable-input honesty (s138): a chmod-000 file arg crashed
+  every command with a raw PermissionError traceback rc1 — the access
+  axis of the s137 family drill (corrupt content s131 / corrupt db
+  bytes s136 / unreadable files s137). Cure: OSError at the parse/read
+  boundary (digest, verify, stats, dupes, prune) → one-line stderr
+  `daybreak: cannot read: <reason>: <path>`, exit 2; FileNotFoundError
+  keeps its legacy message byte-identically. Fail-fast by design:
+  partial output over an unreadable corpus would fake coverage.
+  Directory expansion names the exact unreadable .md. (tag v1.5.1)
+
 ## Gotchas learned
 
 - Year-less dates ("Aug 26") need today-injected resolution or tests go
